@@ -10,14 +10,17 @@ async fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     loop {
-
         //second item contains the IP and port onf the new conn
         let (socket, _) = listener.accept().await.unwrap();
-        process(socket).await;
+    
+        //spawn a new task for each inbound socket , the new socket is moved 
+        // to the new task and processed there.
+
+        tokio::spawn(async move{ 
+            process(socket).await;
+        });  
     }
 }
-
-
 
 async fn process(socket: TcpStream) { 
 
