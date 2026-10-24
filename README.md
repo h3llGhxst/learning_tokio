@@ -48,3 +48,10 @@ Status: in progress (currently on: Hello Tokio)
 - Verified with `mini-redis-cli set` then `get` -> (nil).
 - A panic in `process` kills only that connection's task.
 - Fix: shared `Arc<Mutex<HashMap>>`, clone the Arc per task.
+
+
+## type Db = Arc<Mutex<HashMap<String, Bytes>>>
+- `type` = alias only, no new type.
+- HashMap = the data; Mutex = one writer at a time; Arc = many owners.
+- Clone the Arc per task (cheap), all point to the same map.
+- `lock().unwrap()` gets exclusive access; guard drops = lock released.
