@@ -36,3 +36,15 @@ Status: in progress (currently on: Hello Tokio)
 - Same error in a loop: "value moved in previous iteration".
 - Shared data: `Arc` + clone per task. Single-owner data (sockets): move.
 - Alternative to sharing: send messages over a channel.
+
+## Send bound 
+- Task spawned by `tokio::spanw` must implement `Send`.
+- This allows the tokio runtime to move tasks between threads.
+
+
+## Per-connection state (the bug)
+- `db` created inside `process` = one HashMap per connection, so clients
+  can't see each other's data.
+- Verified with `mini-redis-cli set` then `get` -> (nil).
+- A panic in `process` kills only that connection's task.
+- Fix: shared `Arc<Mutex<HashMap>>`, clone the Arc per task.
