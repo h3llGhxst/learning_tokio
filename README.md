@@ -10,18 +10,20 @@ Status: in progress (currently on: Hello Tokio)
 - Calling an `async fn` doesn't run it. It returns a `Future`, a value
   representing the operation that hasn't happened yet (futures are lazy).
 - `.await` on that Future actually drives it to completion and yields its result.
-- No `.await` = the code never runs.
-- `#tokio::main` is a macro that transforms async fn main() to synchronous main.
+- A future must be polled to run; `.await` and spawning are ways to make that happen.
+- `#[tokio::main]` transforms `async fn main()` into a synchronous entry point
+  that creates a Tokio runtime and runs the async code.
 
 
 ## Accepting sockets
 - `TcpListener::bind(addr).await` claims the port.
 - Loop on `listener.accept().await`, which returns `(TcpStream, SocketAddr)`;
   the addr is the connecting client's IP and port.
-- `process(socket)` reads a frame; if there is one, it logs it and replies
-  with an `"unimplemented"` error (no commands exist yet).
+- `process(socket, db)` reads frames and handles `GET` and `SET` commands
+  using the shared database.
 - Flaw: awaiting `process` inline serves one client at a time. Spawning fixes this.
-- to avoid blocking the event loop , spawn a task for each client. using `tokio::spawn()`
+- Spawn a task for each client using `tokio::spawn()` so other clients can
+  progress while one waits for I/O. Spawning does not make blocking code nonblocking.
 
 
 ## Spawn return value
@@ -37,9 +39,9 @@ Status: in progress (currently on: Hello Tokio)
 - Shared data: `Arc` + clone per task. Single-owner data (sockets): move.
 - Alternative to sharing: send messages over a channel.
 
-## Send bound 
-- Task spawned by `tokio::spanw` must implement `Send`.
-- This allows the tokio runtime to move tasks between threads.
+## Send bound
+- The future passed to `tokio::spawn` must implement `Send`.
+- This allows the Tokio runtime to move tasks between threads.
 
 
 ## Per-connection state (the bug)
@@ -52,26 +54,34 @@ Status: in progress (currently on: Hello Tokio)
 
 ## type Db = Arc<Mutex<HashMap<String, Bytes>>>
 - `type` = alias only, no new type.
-- HashMap = the data; Mutex = one writer at a time; Arc = many owners.
+- HashMap = the data; Mutex = one task or thread accessing the protected
+  data at a time (including readers); Arc = many owners.
 - Clone the Arc per task (cheap), all point to the same map.
 - `lock().unwrap()` gets exclusive access; guard drops = lock released.
 
-## MutexGuard 
-- `std::sync::MutexGuard` is not type `Send` , this means you cannot
-- a  mutex lock to another thread , you get an error because tokio
-- tokio runtime can move tasks between threads at every `.await` 
-    ``` 
-    sol example
-        
-        // This works!
-        async fn increment_and_do_stuff(mutex: &Mutex<i32>) {
-            {
-                let mut lock: MutexGuard<i32> = mutex.lock().unwrap();
-                *lock += 1;
-            } // lock goes out of scope here
+## MutexGuard
+- `mutex.lock().unwrap()` returns a `MutexGuard`, giving exclusive
+  access to the protected data.
+- Dropping the guard releases the lock.
+- `std::sync::MutexGuard` does not implement `Send`, so it cannot
+  be transferred between threads.
+- Holding it across `.await` makes the future non-`Send`, which means
+  that future cannot be used with `tokio::spawn`.
+- Use an inner scope to drop the guard before awaiting:
 
-            do_something_async().await;
-        }
+```rust
+use std::sync::{Mutex, MutexGuard};
 
+async fn increment_and_do_stuff(mutex: &Mutex<i32>) {
+    {
+        let mut lock: MutexGuard<'_, i32> = mutex.lock().unwrap();
+        *lock += 1;
+    } // The guard drops here, releasing the lock.
 
-    ```
+    do_something_async().await;
+}
+```
+
+Here, `do_something_async()` stands for another async function in the program.
+In `main.rs`, each guard drops at the end of its `Set` or `Get` block,
+before `connection.write_frame(&response).await`.
