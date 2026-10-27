@@ -55,3 +55,23 @@ Status: in progress (currently on: Hello Tokio)
 - HashMap = the data; Mutex = one writer at a time; Arc = many owners.
 - Clone the Arc per task (cheap), all point to the same map.
 - `lock().unwrap()` gets exclusive access; guard drops = lock released.
+
+## MutexGuard 
+- `std::sync::MutexGuard` is not type `Send` , this means you cannot
+- a  mutex lock to another thread , you get an error because tokio
+- tokio runtime can move tasks between threads at every `.await` 
+    ``` 
+    sol example
+        
+        // This works!
+        async fn increment_and_do_stuff(mutex: &Mutex<i32>) {
+            {
+                let mut lock: MutexGuard<i32> = mutex.lock().unwrap();
+                *lock += 1;
+            } // lock goes out of scope here
+
+            do_something_async().await;
+        }
+
+
+    ```
